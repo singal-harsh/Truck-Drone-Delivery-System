@@ -1,0 +1,151 @@
+!@encoding CP1252
+model ModelName
+uses "mmxprs"; !gain access to the Xpress-Optimizer solver
+
+!sample declarations section
+declarations
+L = 16 !Number of points in our dataset
+C = 0..L !Number of Locations
+k = 2 !Max Drones allowed from a launch site
+M = 1000 !Big number to faciliate some constraints
+
+Dt: array(C,C) of integer !Distance Matrix
+st: array(C,C) of mpvar !switch if truck goes from i to j
+sd: array(C,C) of mpvar !switch if drone goes from i to j
+p: array(C) of mpvar !position nodes
+t: array(C) of mpvar !nodes denoting truck point
+d: array(C) of mpvar !nodes denoting truck point
+end-declarations
+
+!Brute Force
+Dt:: [0,109,64,60,45,63,96,101,60,61,89,70,42,55,73,107,0,
+109,0,63,55,67,82,70,50,64,48,94,91,89,55,51,50,109,
+64,63,0,51,46,20,34,38,3,40,41,30,29,25,63,44,64,
+60,55,51,0,15,68,81,73,49,12,92,78,60,26,15,77,60,
+45,67,46,15,0,59,79,75,43,18,86,70,48,22,29,80,45,
+63,82,20,68,59,0,35,48,20,58,27,11,22,42,81,54,63,
+96,70,34,81,79,35,0,22,37,69,27,35,55,57,90,25,96,
+101,50,38,73,75,48,22,0,41,61,49,52,66,53,79,6,101,
+60,64,3,49,43,20,37,41,0,38,43,31,27,23,61,47,60,
+61,48,40,12,18,58,69,61,38,0,82,69,53,16,23,65,61,
+89,94,41,92,86,27,27,49,43,82,0,19,47,67,104,52,89,
+70,91,30,78,70,11,35,52,31,69,19,0,28,53,91,57,70,
+42,89,29,60,48,22,55,66,27,53,47,28,0,39,74,71,42,
+55,55,25,26,22,42,57,53,23,16,67,53,39,0,38,58,55,
+73,51,63,15,29,81,90,79,61,23,104,91,74,38,0,82,73,
+107,50,44,77,80,54,25,6,47,65,52,57,71,58,82,0,107,
+0,109,64,60,45,63,96,101,60,61,89,70,42,55,73,107,0]
+
+
+forall (i in C, j in C) do 
+	st(i,j) is_binary
+	sd(i,j) is_binary
+end-do
+
+forall (i in C) do
+	t(i) is_binary
+	d(i) is_binary
+end-do
+
+forall (i in C) do
+	p(i) is_integer
+end-do
+
+!Define Objective
+obj:= sum(i in C)sum(j in C)Dt(i,j)*st(i,j)*10 + sum(i in C)sum(j in C)Dt(i,j)*sd(i,j)*6
+
+p(0) = 0
+p(L) = L
+
+!Ensuring truck doesn't go from node 11 
+sum(j in C) st(L,j) = 0
+
+!Ensuring truck doesn't enter node 0
+sum(i in C) st(i,0) = 0
+
+!Ensuring truck surely leaves depot
+sum(j in C) st(0,j) = 1
+
+!Ensuring truck ends at dummy point
+sum(i in C) st(i,L) = 1
+
+!Truck doesn't go to dummy from depot
+st(0,L) = 0
+
+!Any node should have maximum of 1 truck entering and exiting
+forall(i in C) sum(j in C) st(i,j) <= 1
+forall(i in C) sum(j in C) st(j,i) <= 1
+
+
+!Ensuring truck and drone doesnot stay at the same node
+forall (j in C) do 
+sum(i in C| i = j)st(i,j) = 0
+sum(i in C| i = j)sd(i,j) = 0
+end-do
+
+!assigning positions to nodes
+forall(i in C,j in C) do
+p(i)+ 1 - M*(1 - st(i,j)) <= p(j)
+p(j) <= L
+end-do
+
+!Ensuring drone doesn't go from node 0 and 11 
+forall(j in C)sd(0,j) = 0
+forall(j in C)sd(L,j) = 0
+
+!Ensuring drone doesn't go to node 0 and 11 
+forall(j in C)sd(j,0) = 0
+forall(j in C)sd(j,L) = 0
+
+!Ensure either position is truck or drone
+forall(i in C) do
+d(i) + t(i) = 1
+end-do
+
+!Ensuring the ending truck node is switched on if that arc is on
+forall(i in 0..L-1) do
+sum(j in 1..L) st(i,j) = t(i)
+end-do
+
+!Ensuring the starting truck node is switched on if that arc is on
+forall(j in 1..L) do
+sum(i in 0..L-1) st(i,j) = t(j)
+end-do
+
+!Ensuring the drone node is switched on if that arc is on
+forall(j in 1..L-1) do
+sum(i in 1..L-1) sd(i,j) = d(j)
+end-do
+
+!Ensuring only limited number of drones go from any truck node
+forall(i in 1..L-1) do
+sum(j in 1..L-1) sd(i,j) <= k*t(i)
+end-do
+
+!Ensuring no drone goes between truckpoints
+forall (i in C, j in C) do
+sd(i,j) <= 2- t(i) - t(j)
+end-do
+
+!Ensuring no drone goes between drone points
+forall (i in C, j in C) do
+sd(i,j) <= 2-d(i) - d(j)
+end-do
+
+!Ensuring no truck between 2 drone supplied points 
+forall (i in C, j in C) do
+st(i,j) <= 2-d(i) - d(j)
+end-do
+
+minimize(obj)
+
+writeln("Begin running model")
+writeln("Optimal Objective: ",getobjval)
+forall(i in C, j in C|getsol(st(i,j))>0) writeln("st_",i,",",j,": ",getsol(st(i,j)))
+forall(i in C, j in C|getsol(sd(i,j))>0) writeln("sd_",i,",",j,": ",getsol(sd(i,j)))
+forall(i in C) writeln("p_",i,": ",getsol(p(i)))
+forall(i in C|getsol(d(i)) > 0) writeln("d_",i,": ",getsol(d(i)))
+forall(i in C|getsol(t(i)) > 0) writeln("t_",i,": ",getsol(t(i)))
+writeln("End running model")
+
+end-model
